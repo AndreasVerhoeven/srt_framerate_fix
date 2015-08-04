@@ -1,0 +1,158 @@
+<?php
+
+$inputFrameRate = 25.0;
+$outputFrameRate = 24.0 * 29.97 / 30.0;
+$offset = 500;
+
+if($argc < 3)
+{
+    die("{$argv[0]} inputfile outputfile\n");
+}
+
+$inputFile = $argv[1];
+$outputFile = $argv[2];
+
+convertFile($inputFile, $outputFile, $inputFrameRate, $outputFrameRate, $offset);
+
+function convertFile($inputFile, $outputFile, $inputFrameRate, $outputFrameRate, $offset)
+{
+	$contents = file_get_contents($inputFile);
+	$items = parseIntoSubTitles($contents);
+
+	foreach($items as $item)
+	{
+		$startMs = convertTimeNumberOfToMilliSeconds($item->start);
+		$startMs = $startMs * $inputFrameRate / $outputFrameRate;
+		$startMs += $offset;
+		$item->start = convertNumberOfMillisecondsToTime($startMs);
+		
+		$endMs = convertTimeNumberOfToMilliSeconds($item->end);
+		$endMs = $endMs * $inputFrameRate / $outputFrameRate;
+		$endMs += $offset;
+		$item->end = convertNumberOfMillisecondsToTime($endMs);
+	}
+	
+	$contents = subTitlesIntoContents($items);
+	
+	if(empty($outputFile))
+	{
+		echo $contents, PHP_EOL;
+	}
+	else
+	{
+		file_put_contents($outputFile, $contents);
+		echo "Wrote {$outputFile}\n";
+	}
+}
+
+function convertTimeNumberOfToMilliSeconds($time)
+{
+	//"00:00:10,500"
+	
+	list($time, $milliseconds) = explode(",", $time);
+	list($hours, $minutes, $seconds) = explode(":", $time);
+	
+	$totalNumberOfMilliseconds = $milliseconds;
+	$totalNumberOfMilliseconds += $seconds * 1000;
+	$totalNumberOfMilliseconds += $minutes * 60 * 1000;
+	$totalNumberOfMilliseconds += $hours * 60 * 60 * 1000;
+	
+	return $totalNumberOfMilliseconds;
+}
+
+function convertNumberOfMillisecondsToTime($numberOfMilliseconds)
+{
+	$hours = floor($numberOfMilliseconds / (60 * 60 * 1000));
+	$numberOfMilliseconds -= $hours * 60 * 60 * 1000;
+	
+	$minutes = floor($numberOfMilliseconds / (60 * 1000));
+	$numberOfMilliseconds -= $minutes * 60 * 1000;
+	
+	$seconds = floor($numberOfMilliseconds / 1000);
+	$numberOfMilliseconds -= $seconds * 1000;
+	
+	return sprintf("%02d:%02d:%02d,%03d", $hours, $minutes, $seconds, $numberOfMilliseconds);
+}
+
+function subTitlesIntoContents($parts)
+{
+	$contents = '';
+	foreach($parts as $part)
+	{
+		$pieces = implode("\r\n", linesFromSubTitlePart($part));
+		$contents .= $pieces . "\r\n\r\n";
+	}
+	
+	return $contents;
+}
+
+function parseIntoSubTitles($contents)
+{
+	$inPart = false;
+	
+	$currentPartLines = array();
+	$parts = array();
+	
+	$lines = explode("\r\n", $contents);
+	foreach($lines as $line)
+	{
+		$isEmptyLine = $line == '';
+		if($isEmptyLine)
+		{
+			if($inPart)
+			{
+				$part = SubtitlePartFromLines($currentPartLines);
+				if($part != null)
+				{
+					$parts[] = $part;
+				}
+				
+				$currentPartLines = array();
+				$inPart = false;
+			}
+		}
+		else
+		{
+			$inPart = true;
+			$currentPartLines[] = $line;
+		}
+	}
+	
+	if(count($currentPartLines) > 0)
+		$parts[] = $currentPartLines;
+		
+	return $parts;
+}
+
+function linesFromSubTitlePart($part)
+{
+	$lines = array();
+	$lines[] = $part->index;
+	$lines[] = "{$part->start} --> {$part->end}";
+	
+	foreach($part->textLines as $textLine)
+		$lines[] = $textLine;
+	
+	return $lines;
+}
+
+function SubtitlePartFromLines($lines)
+{
+	if(count($lines) < 2)
+		return null;
+	
+	$index = $lines[0];
+	$times = explode("-->", $lines[1]);
+	$startTime = trim($times[0]);
+	$endTime = trim($times[1]);
+	
+	$textLines = array_slice($lines, 2);
+	
+	$part = new StdClass;
+	$part->index = $index;
+	$part->start = $startTime;
+	$part->end = $endTime;
+	$part->textLines = $textLines;
+	
+	return $part;
+}
